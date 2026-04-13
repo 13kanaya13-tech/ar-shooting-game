@@ -36,13 +36,34 @@ function spawnEnemy(wave: number): Enemy {
   const minAngle = wave === 1 ? 1 : 3;
   const dist = minAngle + Math.random() * (maxAngle - minAngle);
 
+  const wx = Math.cos(angle) * dist;
+  const wy = Math.sin(angle) * dist * 0.55; // slightly compressed vertically
+
+  // Serpentine amplitude and frequency by type:
+  //   fast  → wide, rapid weave (5–10°, 0.8–1.4 Hz)
+  //   tank  → slow, narrow lumber (2–5°, 0.2–0.4 Hz)
+  //   basic → moderate (3–7°, 0.4–0.7 Hz)
+  const serpAmp =
+    type === 'fast' ? 5 + Math.random() * 5 :
+    type === 'tank' ? 2 + Math.random() * 3 :
+    3 + Math.random() * 4;
+  const serpFreq =
+    type === 'fast' ? 0.8 + Math.random() * 0.6 :
+    type === 'tank' ? 0.2 + Math.random() * 0.2 :
+    0.4 + Math.random() * 0.3;
+
   return {
     id: uid(),
-    worldX: Math.cos(angle) * dist,
-    worldY: Math.sin(angle) * dist * 0.55, // slightly compressed vertically
+    worldX: wx,
+    worldY: wy,
     depth: startDepth,
     isHit: false,
     hitTimer: 0,
+    serpentinePhase: Math.random() * Math.PI * 2,
+    serpentineAmplitude: serpAmp,
+    serpentineFreq: serpFreq,
+    serpentineBaseX: wx,
+    serpentineBaseY: wy,
     ...ENEMY_CONFIGS[type],
   };
 }
@@ -202,7 +223,14 @@ export default function ARGame() {
           const waveMultiplier = w === 1 ? 0.5 : 1 + (w - 1) * 0.12;
           const newDepth = e.depth - e.depthSpeed * waveMultiplier * delta;
 
-          return { ...e, depth: newDepth };
+          // Serpentine: oscillate perpendicular to the spawn direction
+          const newPhase = e.serpentinePhase + delta * e.serpentineFreq * Math.PI * 2;
+          const swing = Math.sin(newPhase) * e.serpentineAmplitude;
+          const spawnAngle = Math.atan2(e.serpentineBaseY, e.serpentineBaseX);
+          const newWorldX = e.serpentineBaseX + Math.cos(spawnAngle + Math.PI / 2) * swing;
+          const newWorldY = e.serpentineBaseY + Math.sin(spawnAngle + Math.PI / 2) * swing * 0.55;
+
+          return { ...e, depth: newDepth, worldX: newWorldX, worldY: newWorldY, serpentinePhase: newPhase };
         })
         .filter((e): e is Enemy => e !== null && !(e.isHit && e.hitTimer <= 0));
 

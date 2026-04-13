@@ -13,6 +13,12 @@ export interface Enemy {
   depthSpeed: number;     // depth units consumed per second
   isHit: boolean;
   hitTimer: number;
+  // Serpentine movement
+  serpentinePhase: number;      // current oscillation phase (radians)
+  serpentineAmplitude: number;  // swing width in world-degrees
+  serpentineFreq: number;       // oscillations per second
+  serpentineBaseX: number;      // immutable spawn X
+  serpentineBaseY: number;      // immutable spawn Y
 }
 
 export interface Calibration {
