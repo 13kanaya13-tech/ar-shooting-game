@@ -3,11 +3,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useDeviceOrientation } from '@/hooks/useDeviceOrientation';
 import { useCamera } from '@/hooks/useCamera';
-import { Enemy, EnemyType, GameState, Calibration, GAME_CONFIG, ENEMY_CONFIGS, ATTACK_DEPTH } from '@/types/game';
+import { Enemy, EnemyType, GameState, Calibration, GAME_CONFIG, ENEMY_CONFIGS, ATTACK_DEPTH, BulletEffect, HitEffect } from '@/types/game';
 import Crosshair from './Crosshair';
 import EnemySprite from './EnemySprite';
 import HUD from './HUD';
 import OffscreenIndicator from './OffscreenIndicator';
+import BulletEffectComponent from './BulletEffect';
+import HitEffectComponent from './HitEffect';
 
 let uidCounter = 0;
 function uid() { return `e${++uidCounter}`; }
@@ -127,6 +129,8 @@ export default function ARGame() {
   const [muzzleFlash, setMuzzleFlash] = useState(false);
   const [screenHit, setScreenHit] = useState(false);
   const [killCount, setKillCount] = useState(0);
+  const [bulletEffects, setBulletEffects] = useState<BulletEffect[]>([]);
+  const [hitEffects, setHitEffects] = useState<HitEffect[]>([]);
 
   const gameStateRef = useRef(gameState);
   const orientationRef = useRef(orientation);
@@ -134,6 +138,7 @@ export default function ARGame() {
   const livesRef = useRef(lives);
   const waveRef = useRef(wave);
   const killCountRef = useRef(killCount);
+  const enemiesRef = useRef(enemies);
   const lastSpawnRef = useRef(0);
   const lastFrameRef = useRef(0);
   const rafRef = useRef<number>(0);
@@ -156,6 +161,7 @@ export default function ARGame() {
   livesRef.current = lives;
   waveRef.current = wave;
   killCountRef.current = killCount;
+  enemiesRef.current = enemies;
 
   const enemiesPerWave = useCallback((w: number) => 5 + w * 2, []);
   const maxOnScreen = useCallback((w: number) => Math.min(3 + w, 8), []);
@@ -248,13 +254,51 @@ export default function ARGame() {
     if (gameStateRef.current !== 'playing') return;
 
     setMuzzleFlash(true);
-    setTimeout(() => setMuzzleFlash(false), 120);
+    setTimeout(() => setMuzzleFlash(false), 100);
 
     const { scaleX, scaleY } = GAME_CONFIG;
     const cal = calibrationRef.current;
     const ori = smoothedOrientationRef.current;
     const dGamma = ori.gamma - cal.gamma;
     const dBeta = ori.beta - cal.beta;
+
+    // Determine where bullet goes before mutating enemies
+    let hitScreenX = 0;
+    let hitScreenY = 0;
+    let hitType: EnemyType | null = null;
+    let hitScore = 0;
+    const enemies = enemiesRef.current;
+
+    for (const e of enemies) {
+      const sx = (e.worldX + dGamma) * scaleX;
+      const sy = (e.worldY + dBeta) * scaleY;
+      const depthProgress = 1 - e.depth;
+      const scaledRadius = e.baseHitRadius * (0.06 + 0.94 * Math.pow(depthProgress, 1.4));
+      if (Math.sqrt(sx ** 2 + sy ** 2) < scaledRadius + 15) {
+        hitScreenX = sx;
+        hitScreenY = sy;
+        hitType = e.type;
+        hitScore = e.type === 'basic' ? 100 : e.type === 'fast' ? 150 : 300;
+        break;
+      }
+    }
+
+    // Bullet travels toward hit point (or straight ahead on miss)
+    const bulletAngle = hitType ? Math.atan2(hitScreenY, hitScreenX) : 0;
+    const bulletLen = hitType
+      ? Math.sqrt(hitScreenX ** 2 + hitScreenY ** 2)
+      : Math.max(window.innerWidth, window.innerHeight) * 0.5;
+
+    const bulletId = uid();
+    setBulletEffects(prev => [...prev, { id: bulletId, angle: bulletAngle, length: bulletLen }]);
+
+    // After bullet arrives, spawn hit effect if applicable
+    if (hitType) {
+      setTimeout(() => {
+        const effectId = uid();
+        setHitEffects(prev => [...prev, { id: effectId, x: hitScreenX, y: hitScreenY, type: hitType!, score: hitScore }]);
+      }, 100);
+    }
 
     setEnemies(prev => {
       let hit = false;
@@ -264,14 +308,13 @@ export default function ARGame() {
         if (hit) return e;
         const sx = (e.worldX + dGamma) * scaleX;
         const sy = (e.worldY + dBeta) * scaleY;
-        // Hit radius scales with the visual size (depth), plus a fixed 15px assist
         const depthProgress = 1 - e.depth;
         const scaledRadius = e.baseHitRadius * (0.06 + 0.94 * Math.pow(depthProgress, 1.4));
         if (Math.sqrt(sx ** 2 + sy ** 2) < scaledRadius + 15) {
           hit = true;
           const newHealth = e.health - 1;
           if (newHealth <= 0) {
-            scoreGain = e.type === 'basic' ? 100 : e.type === 'fast' ? 150 : 300;
+            scoreGain = hitScore;
             setKillCount(k => { killCountRef.current = k + 1; return k + 1; });
             return { ...e, health: 0, isHit: true, hitTimer: 0 };
           }
@@ -434,6 +477,28 @@ export default function ARGame() {
             const { sx, sy } = getEnemyScreenPos(e);
             return <OffscreenIndicator key={`ind-${e.id}`} screenX={sx} screenY={sy} type={e.type} />;
           })}
+
+          {/* Bullet effects */}
+          {bulletEffects.map(b => (
+            <BulletEffectComponent
+              key={b.id}
+              angle={b.angle}
+              length={b.length}
+              onDone={() => setBulletEffects(prev => prev.filter(x => x.id !== b.id))}
+            />
+          ))}
+
+          {/* Hit explosion effects */}
+          {hitEffects.map(h => (
+            <HitEffectComponent
+              key={h.id}
+              x={h.x}
+              y={h.y}
+              type={h.type}
+              score={h.score}
+              onDone={() => setHitEffects(prev => prev.filter(x => x.id !== h.id))}
+            />
+          ))}
 
           <Crosshair flash={muzzleFlash} />
           <HUD score={score} lives={lives} wave={wave} />
