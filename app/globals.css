@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+  user-select: none;
+}
+
+html, body {
+  background: #000;
+  color: #fff;
+  font-family: system-ui, -apple-system, sans-serif;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Safe area padding for notch/home indicator */
+.pt-safe-top {
+  padding-top: env(safe-area-inset-top, 16px);
+}
