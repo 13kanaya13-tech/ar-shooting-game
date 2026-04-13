@@ -19,7 +19,7 @@ export interface Calibration {
   gamma: number;
 }
 
-export type GameState = 'title' | 'permission' | 'calibrating' | 'playing' | 'gameover';
+export type GameState = 'title' | 'permission' | 'calibrating' | 'tutorial' | 'playing' | 'gameover';
 
 export interface GameConfig {
   scaleX: number; // px per degree

@@ -45,6 +45,75 @@ function spawnEnemy(wave: number): Enemy {
   };
 }
 
+// ---- Tutorial steps ----
+const TUTORIAL_STEPS = [
+  {
+    icon: '📱',
+    title: 'デバイスを傾けて照準を動かす',
+    body: '中央の丸が照準です。\nスマホを右に傾けると照準が右へ、\n左に傾けると左へ動きます。',
+    hint: '今すぐ傾けて動きを確認してみよう！',
+  },
+  {
+    icon: '👾',
+    title: '敵に照準を合わせてタップ',
+    body: '敵は遠くに小さく現れ、\nだんだん近づいて大きくなります。\n画面をタップすると射撃します。',
+    hint: '近づく前に倒してライフを守ろう！',
+  },
+  {
+    icon: '⚠️',
+    title: '敵が来る方向を矢印で確認',
+    body: '敵が画面外にいるときは\n端に矢印が表示されます。\nデバイスを向けて確認しましょう。',
+    hint: '準備ができたらスタート！',
+  },
+];
+
+function Tutorial({ onFinish }: { onFinish: () => void }) {
+  const [step, setStep] = useState(0);
+  const current = TUTORIAL_STEPS[step];
+  const isLast = step === TUTORIAL_STEPS.length - 1;
+
+  return (
+    <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center text-white z-50 px-6">
+      {/* Skip button */}
+      <button
+        className="absolute top-12 right-6 text-gray-400 text-sm border border-gray-600 px-3 py-1 rounded-lg active:opacity-60"
+        onClick={onFinish}
+      >
+        スキップ
+      </button>
+
+      {/* Step indicator */}
+      <div className="flex gap-2 mb-8">
+        {TUTORIAL_STEPS.map((_, i) => (
+          <div
+            key={i}
+            className={`w-2 h-2 rounded-full transition-colors ${i === step ? 'bg-yellow-400' : 'bg-gray-600'}`}
+          />
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="text-6xl mb-6">{current.icon}</div>
+      <h2 className="text-xl font-black text-yellow-400 text-center mb-4">{current.title}</h2>
+      <p className="text-gray-200 text-sm text-center leading-7 whitespace-pre-line mb-6">
+        {current.body}
+      </p>
+      <p className="text-yellow-400/70 text-xs text-center mb-10">{current.hint}</p>
+
+      {/* Next / Start */}
+      <button
+        className="w-56 py-4 bg-yellow-400 text-black font-bold text-lg rounded-2xl active:scale-95 transition-transform shadow-lg shadow-yellow-400/30"
+        onClick={() => {
+          if (isLast) onFinish();
+          else setStep(s => s + 1);
+        }}
+      >
+        {isLast ? 'ゲームスタート！' : '次へ →'}
+      </button>
+    </div>
+  );
+}
+
 export default function ARGame() {
   const { orientation, requestPermission } = useDeviceOrientation();
   const { videoRef, isReady: cameraReady, startCamera } = useCamera();
@@ -193,8 +262,8 @@ export default function ARGame() {
 
       const next = prev.map(e => {
         if (hit) return e;
-        const sx = (e.worldX - dGamma) * scaleX;
-        const sy = (e.worldY - dBeta) * scaleY;
+        const sx = (e.worldX + dGamma) * scaleX;
+        const sy = (e.worldY + dBeta) * scaleY;
         // Hit radius scales with the visual size (depth), plus a fixed 15px assist
         const depthProgress = 1 - e.depth;
         const scaledRadius = e.baseHitRadius * (0.06 + 0.94 * Math.pow(depthProgress, 1.4));
@@ -220,9 +289,11 @@ export default function ARGame() {
     const { scaleX, scaleY } = GAME_CONFIG;
     const cal = calibrationRef.current;
     const ori = smoothedOrientationRef.current;
+    const dGamma = ori.gamma - cal.gamma;
+    const dBeta  = ori.beta  - cal.beta;
     return {
-      sx: (e.worldX - (ori.gamma - cal.gamma)) * scaleX,
-      sy: (e.worldY - (ori.beta - cal.beta)) * scaleY,
+      sx: (e.worldX + dGamma) * scaleX,
+      sy: (e.worldY + dBeta)  * scaleY,
     };
   }, []);
 
@@ -297,13 +368,18 @@ export default function ARGame() {
                 killCountRef.current = 0;
                 setEnemies([]);
                 lastSpawnRef.current = 0;
-                setGameState('playing');
+                setGameState('tutorial');
               }}
             >
               スタート
             </button>
           </div>
         </div>
+      )}
+
+      {/* ======== TUTORIAL ======== */}
+      {gameState === 'tutorial' && (
+        <Tutorial onFinish={() => setGameState('playing')} />
       )}
 
       {/* ======== GAME OVER ======== */}
