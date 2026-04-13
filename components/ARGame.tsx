@@ -70,9 +70,20 @@ export default function ARGame() {
   const rafRef = useRef<number>(0);
   const cameraStartedRef = useRef(false);
 
+  // Low-pass filtered orientation — smooths out hand tremor.
+  // alpha: 0=no movement, 1=no filter. 0.10 gives ~100ms smoothing at 60fps.
+  const SMOOTH_ALPHA = 0.10;
+  const smoothedOrientationRef = useRef({ beta: 45, gamma: 0 });
+
   gameStateRef.current = gameState;
   orientationRef.current = orientation;
   calibrationRef.current = calibration;
+
+  // Update smoothed orientation every render (driven by raw orientation state changes)
+  smoothedOrientationRef.current = {
+    beta:  smoothedOrientationRef.current.beta  * (1 - SMOOTH_ALPHA) + orientation.beta  * SMOOTH_ALPHA,
+    gamma: smoothedOrientationRef.current.gamma * (1 - SMOOTH_ALPHA) + orientation.gamma * SMOOTH_ALPHA,
+  };
   livesRef.current = lives;
   waveRef.current = wave;
   killCountRef.current = killCount;
@@ -161,7 +172,7 @@ export default function ARGame() {
   }, [gameState, gameLoop]);
 
   const calibrate = useCallback(() => {
-    setCalibration({ beta: orientationRef.current.beta, gamma: orientationRef.current.gamma });
+    setCalibration({ beta: smoothedOrientationRef.current.beta, gamma: smoothedOrientationRef.current.gamma });
   }, []);
 
   const shoot = useCallback(() => {
@@ -172,7 +183,7 @@ export default function ARGame() {
 
     const { scaleX, scaleY } = GAME_CONFIG;
     const cal = calibrationRef.current;
-    const ori = orientationRef.current;
+    const ori = smoothedOrientationRef.current;
     const dGamma = ori.gamma - cal.gamma;
     const dBeta = ori.beta - cal.beta;
 
@@ -208,7 +219,7 @@ export default function ARGame() {
   const getEnemyScreenPos = useCallback((e: Enemy) => {
     const { scaleX, scaleY } = GAME_CONFIG;
     const cal = calibrationRef.current;
-    const ori = orientationRef.current;
+    const ori = smoothedOrientationRef.current;
     return {
       sx: (e.worldX - (ori.gamma - cal.gamma)) * scaleX,
       sy: (e.worldY - (ori.beta - cal.beta)) * scaleY,
