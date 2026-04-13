@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useDeviceOrientation } from '@/hooks/useDeviceOrientation';
 import { useCamera } from '@/hooks/useCamera';
-import { Enemy, EnemyType, GameState, Calibration, GAME_CONFIG, ENEMY_CONFIGS } from '@/types/game';
+import { Enemy, EnemyType, GameState, Calibration, GAME_CONFIG, ENEMY_CONFIGS, ATTACK_DEPTH } from '@/types/game';
 import Crosshair from './Crosshair';
 import EnemySprite from './EnemySprite';
 import HUD from './HUD';
@@ -13,6 +13,7 @@ let uidCounter = 0;
 function uid() { return `e${++uidCounter}`; }
 
 function spawnEnemy(wave: number): Enemy {
+  // Enemy type distribution
   const types: EnemyType[] = wave < 3 ? ['basic'] : wave < 6 ? ['basic', 'fast'] : ['basic', 'fast', 'tank'];
   const weights = wave < 3 ? [1] : wave < 6 ? [0.7, 0.3] : [0.5, 0.3, 0.2];
   const r = Math.random();
@@ -23,12 +24,21 @@ function spawnEnemy(wave: number): Enemy {
     if (r < acc) { type = types[i]; break; }
   }
 
+  // Wave 1: spawn near center at shallow depth so players can learn the mechanic.
+  // Later waves: wider angles, deeper (farther) starting position.
+  const maxAngle = wave === 1 ? 6 : wave <= 3 ? 12 : Math.min(8 + wave * 3, 28);
+  const startDepth = wave === 1 ? 0.45 : wave <= 3 ? 0.65 : Math.min(0.55 + wave * 0.05, 0.92);
+
   const angle = Math.random() * Math.PI * 2;
-  const dist = GAME_CONFIG.maxWorldAngle * (0.6 + Math.random() * 0.4);
+  // Minimum angular distance so enemies don't spawn exactly at center
+  const minAngle = wave === 1 ? 1 : 3;
+  const dist = minAngle + Math.random() * (maxAngle - minAngle);
+
   return {
     id: uid(),
     worldX: Math.cos(angle) * dist,
-    worldY: Math.sin(angle) * dist * 0.6,
+    worldY: Math.sin(angle) * dist * 0.55, // slightly compressed vertically
+    depth: startDepth,
     isHit: false,
     hitTimer: 0,
     ...ENEMY_CONFIGS[type],
@@ -94,19 +104,19 @@ export default function ARGame() {
         .map(e => {
           if (e.isHit && e.hitTimer > 0) return { ...e, hitTimer: e.hitTimer - delta };
 
-          const dist = Math.sqrt(e.worldX ** 2 + e.worldY ** 2);
-          if (dist < 0.5) {
+          // Enemy reached the player → attack
+          if (e.depth <= ATTACK_DEPTH) {
             updatedLives -= 1;
             hitOccurred = true;
             return null as unknown as Enemy;
           }
 
-          const speed = e.speed * (1 + w * 0.15);
-          return {
-            ...e,
-            worldX: e.worldX - (e.worldX / dist) * speed * delta,
-            worldY: e.worldY - (e.worldY / dist) * speed * delta,
-          };
+          // Approach: decrease depth each frame.
+          // Wave scaling: each wave adds 12% speed. Wave 1 gets a 0.5× slowdown for tutorial feel.
+          const waveMultiplier = w === 1 ? 0.5 : 1 + (w - 1) * 0.12;
+          const newDepth = e.depth - e.depthSpeed * waveMultiplier * delta;
+
+          return { ...e, depth: newDepth };
         })
         .filter((e): e is Enemy => e !== null && !(e.isHit && e.hitTimer <= 0));
 
@@ -174,7 +184,10 @@ export default function ARGame() {
         if (hit) return e;
         const sx = (e.worldX - dGamma) * scaleX;
         const sy = (e.worldY - dBeta) * scaleY;
-        if (Math.sqrt(sx ** 2 + sy ** 2) < e.hitRadius + 20) {
+        // Hit radius scales with the visual size (depth), plus a fixed 15px assist
+        const depthProgress = 1 - e.depth;
+        const scaledRadius = e.baseHitRadius * (0.06 + 0.94 * Math.pow(depthProgress, 1.4));
+        if (Math.sqrt(sx ** 2 + sy ** 2) < scaledRadius + 15) {
           hit = true;
           const newHealth = e.health - 1;
           if (newHealth <= 0) {

@@ -18,3 +18,8 @@ html, body {
 .pt-safe-top {
   padding-top: env(safe-area-inset-top, 16px);
 }
+
+/* Danger pulse animation for nearby enemies */
+@keyframes ping {
+  75%, 100% { transform: scale(2); opacity: 0; }
+}
