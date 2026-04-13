@@ -42,8 +42,8 @@ export const ENEMY_CONFIGS: Record<EnemyType, Pick<Enemy, 'health' | 'maxHealth'
 // Visual scale from depth:
 //   progress = 1 - depth  (0=far, 1=close)
 //   visualScale = MIN + (1-MIN) * progress^CURVE
-export const DEPTH_MIN_SCALE = 0.04;  // tiny dot at depth=1
-export const DEPTH_CURVE = 1.6;       // stays small until close, then grows fast
+export const DEPTH_MIN_SCALE = 0.02;  // tiny dot at depth=1
+export const DEPTH_CURVE = 2.8;       // stays tiny until ~depth 0.3, then surges
 
 // depth at which the enemy "attacks"
 export const ATTACK_DEPTH = 0.05;

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useDeviceOrientation } from '@/hooks/useDeviceOrientation';
 import { useCamera } from '@/hooks/useCamera';
-import { Enemy, EnemyType, GameState, Calibration, GAME_CONFIG, ENEMY_CONFIGS, ATTACK_DEPTH, BulletEffect, HitEffect } from '@/types/game';
+import { Enemy, EnemyType, GameState, Calibration, GAME_CONFIG, ENEMY_CONFIGS, ATTACK_DEPTH, DEPTH_MIN_SCALE, DEPTH_CURVE, BulletEffect, HitEffect } from '@/types/game';
 import Crosshair from './Crosshair';
 import EnemySprite from './EnemySprite';
 import HUD from './HUD';
@@ -273,8 +273,9 @@ export default function ARGame() {
       const sx = (e.worldX + dGamma) * scaleX;
       const sy = (e.worldY + dBeta) * scaleY;
       const depthProgress = 1 - e.depth;
-      const scaledRadius = e.baseHitRadius * (0.06 + 0.94 * Math.pow(depthProgress, 1.4));
-      if (Math.sqrt(sx ** 2 + sy ** 2) < scaledRadius + 15) {
+      const visualScale = DEPTH_MIN_SCALE + (1 - DEPTH_MIN_SCALE) * Math.pow(depthProgress, DEPTH_CURVE);
+      const scaledRadius = e.maxDisplayRadius * visualScale;
+      if (Math.sqrt(sx ** 2 + sy ** 2) < scaledRadius) {
         hitScreenX = sx;
         hitScreenY = sy;
         hitType = e.type;

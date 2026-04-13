@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface BulletEffectProps {
   angle: number;   // radians
@@ -10,21 +10,24 @@ interface BulletEffectProps {
 
 export default function BulletEffect({ angle, length, onDone }: BulletEffectProps) {
   const [phase, setPhase] = useState<'shoot' | 'fade'>('shoot');
+  // Capture onDone in a ref so the effect doesn't restart on every re-render
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
   useEffect(() => {
-    const t1 = setTimeout(() => setPhase('fade'), 100);
-    const t2 = setTimeout(() => onDone(), 280);
+    const t1 = setTimeout(() => setPhase('fade'), 80);
+    const t2 = setTimeout(() => onDoneRef.current(), 220);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [onDone]);
+  }, []); // intentionally empty — run once on mount
 
   const deg = (angle * 180) / Math.PI;
 
   return (
     <div
-      className="absolute pointer-events-none z-35"
-      style={{ left: '50%', top: '50%' }}
+      className="absolute pointer-events-none"
+      style={{ left: '50%', top: '50%', zIndex: 35 }}
     >
-      {/* Bullet trail — rotated div growing from center */}
+      {/* Bullet trail */}
       <div style={{
         position: 'absolute',
         left: 0, top: '-2px',
@@ -36,11 +39,11 @@ export default function BulletEffect({ angle, length, onDone }: BulletEffectProp
         boxShadow: '0 0 6px 2px rgba(255,220,60,0.7)',
         borderRadius: '0 2px 2px 0',
         opacity: phase === 'shoot' ? 1 : 0,
-        transition: phase === 'fade' ? 'opacity 0.18s ease-out' : 'none',
-        animation: phase === 'shoot' ? 'bullet-grow 0.09s ease-out forwards' : 'none',
+        transition: phase === 'fade' ? 'opacity 0.14s ease-out' : 'none',
+        animation: phase === 'shoot' ? 'bullet-grow 0.08s ease-out forwards' : 'none',
       }} />
 
-      {/* Muzzle flash at origin */}
+      {/* Muzzle flash */}
       <div style={{
         position: 'absolute',
         left: -8, top: -8,
@@ -48,7 +51,7 @@ export default function BulletEffect({ angle, length, onDone }: BulletEffectProp
         borderRadius: '50%',
         background: 'radial-gradient(circle, rgba(255,255,180,1), rgba(255,200,0,0.6), transparent)',
         opacity: phase === 'shoot' ? 1 : 0,
-        transition: phase === 'fade' ? 'opacity 0.1s' : 'none',
+        transition: phase === 'fade' ? 'opacity 0.08s' : 'none',
       }} />
     </div>
   );
