@@ -1,4 +1,6 @@
-export type EnemyType = 'basic' | 'fast' | 'tank';
+export type EnemyType = 'basic' | 'fast' | 'tank' | 'shield';
+
+export type TauntType = 'weave' | 'bob' | 'circle' | 'zigzag';
 
 export interface Enemy {
   id: string;
@@ -13,6 +15,16 @@ export interface Enemy {
   depthSpeed: number;     // depth units consumed per second
   isHit: boolean;
   hitTimer: number;
+
+  // Taunt motion
+  tauntType: TauntType;
+  tauntPhase: number;       // radians, random per enemy
+  tauntAmplitude: number;   // degrees offset magnitude
+  tauntFreq: number;        // rad/sec
+
+  // Shield (periodically invulnerable)
+  isShielded: boolean;
+  shieldTimer: number;      // seconds until toggle
 }
 
 export interface Calibration {
@@ -20,7 +32,14 @@ export interface Calibration {
   gamma: number;
 }
 
-export type GameState = 'title' | 'permission' | 'calibrating' | 'tutorial' | 'playing' | 'gameover';
+export type GameState =
+  | 'title'
+  | 'permission'
+  | 'calibrating'
+  | 'faceSetup'
+  | 'tutorial'
+  | 'playing'
+  | 'gameover';
 
 export interface GameConfig {
   scaleX: number; // px per degree
@@ -32,12 +51,29 @@ export const GAME_CONFIG: GameConfig = {
   scaleY: 18,
 };
 
-export const ENEMY_CONFIGS: Record<EnemyType, Pick<Enemy, 'health' | 'maxHealth' | 'baseHitRadius' | 'maxDisplayRadius' | 'depthSpeed' | 'type'>> = {
-  //                                              hitRadius  displayRadius
-  basic: { health: 1, maxHealth: 1, baseHitRadius: 44, maxDisplayRadius: 210, depthSpeed: 0.11, type: 'basic' },
-  fast:  { health: 1, maxHealth: 1, baseHitRadius: 32, maxDisplayRadius: 170, depthSpeed: 0.20, type: 'fast'  },
-  tank:  { health: 3, maxHealth: 3, baseHitRadius: 54, maxDisplayRadius: 260, depthSpeed: 0.07, type: 'tank'  },
+type EnemyStaticConfig = Pick<
+  Enemy,
+  'health' | 'maxHealth' | 'baseHitRadius' | 'maxDisplayRadius' | 'depthSpeed' | 'type'
+>;
+
+export const ENEMY_CONFIGS: Record<EnemyType, EnemyStaticConfig> = {
+  //                                                 hitRadius  displayRadius
+  basic:  { health: 1, maxHealth: 1, baseHitRadius: 44, maxDisplayRadius: 210, depthSpeed: 0.11, type: 'basic'  },
+  fast:   { health: 1, maxHealth: 1, baseHitRadius: 32, maxDisplayRadius: 170, depthSpeed: 0.20, type: 'fast'   },
+  tank:   { health: 3, maxHealth: 3, baseHitRadius: 54, maxDisplayRadius: 260, depthSpeed: 0.07, type: 'tank'   },
+  shield: { health: 1, maxHealth: 1, baseHitRadius: 44, maxDisplayRadius: 210, depthSpeed: 0.10, type: 'shield' },
 };
+
+export const SCORE_VALUES: Record<EnemyType, number> = {
+  basic: 100,
+  fast: 150,
+  tank: 300,
+  shield: 250,
+};
+
+// Shield cycling: ~1.5s vulnerable, ~1.2s shielded
+export const SHIELD_OPEN_DURATION = 1.5;
+export const SHIELD_CLOSED_DURATION = 1.2;
 
 // Visual scale from depth:
 //   progress = 1 - depth  (0=far, 1=close)
@@ -51,8 +87,11 @@ export const ATTACK_DEPTH = 0.05;
 // ---- Effect types ----
 export interface BulletEffect {
   id: string;
-  angle: number;   // radians from center (right = 0)
-  length: number;  // px
+  // Arc trajectory endpoints & metadata.
+  // Origin is implicit: bottom-center of screen.
+  targetX: number;  // px from screen center (horizontal)
+  targetY: number;  // px from screen center (vertical)
+  hit: boolean;     // whether this bullet hit an enemy
 }
 
 export interface HitEffect {

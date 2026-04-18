@@ -3,21 +3,44 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useDeviceOrientation } from '@/hooks/useDeviceOrientation';
 import { useCamera } from '@/hooks/useCamera';
-import { Enemy, EnemyType, GameState, Calibration, GAME_CONFIG, ENEMY_CONFIGS, ATTACK_DEPTH, DEPTH_MIN_SCALE, DEPTH_CURVE, BulletEffect, HitEffect } from '@/types/game';
+import {
+  Enemy, EnemyType, TauntType, GameState, Calibration,
+  GAME_CONFIG, ENEMY_CONFIGS, ATTACK_DEPTH,
+  DEPTH_MIN_SCALE, DEPTH_CURVE,
+  SHIELD_OPEN_DURATION, SHIELD_CLOSED_DURATION,
+  SCORE_VALUES,
+  BulletEffect, HitEffect,
+} from '@/types/game';
 import Crosshair from './Crosshair';
 import EnemySprite from './EnemySprite';
 import HUD from './HUD';
 import OffscreenIndicator from './OffscreenIndicator';
-import BulletEffectComponent from './BulletEffect';
+import ArcBullet from './ArcBullet';
 import HitEffectComponent from './HitEffect';
+import FaceSetup from './FaceSetup';
 
 let uidCounter = 0;
 function uid() { return `e${++uidCounter}`; }
 
+const TAUNT_TYPES: TauntType[] = ['weave', 'bob', 'circle', 'zigzag'];
+
 function spawnEnemy(wave: number): Enemy {
-  // Enemy type distribution
-  const types: EnemyType[] = wave < 3 ? ['basic'] : wave < 6 ? ['basic', 'fast'] : ['basic', 'fast', 'tank'];
-  const weights = wave < 3 ? [1] : wave < 6 ? [0.7, 0.3] : [0.5, 0.3, 0.2];
+  // Enemy type distribution — shield type joins from wave 2, tank from wave 6
+  let types: EnemyType[];
+  let weights: number[];
+  if (wave < 2) {
+    types = ['basic'];
+    weights = [1];
+  } else if (wave < 4) {
+    types = ['basic', 'fast', 'shield'];
+    weights = [0.6, 0.25, 0.15];
+  } else if (wave < 6) {
+    types = ['basic', 'fast', 'shield'];
+    weights = [0.45, 0.3, 0.25];
+  } else {
+    types = ['basic', 'fast', 'tank', 'shield'];
+    weights = [0.4, 0.25, 0.15, 0.2];
+  }
   const r = Math.random();
   let acc = 0;
   let type: EnemyType = 'basic';
@@ -36,6 +59,22 @@ function spawnEnemy(wave: number): Enemy {
   const minAngle = wave === 1 ? 1 : 3;
   const dist = minAngle + Math.random() * (maxAngle - minAngle);
 
+  const tauntType = TAUNT_TYPES[Math.floor(Math.random() * TAUNT_TYPES.length)];
+  // Fast & shield enemies are more aggressive taunters
+  const amplitudeBase =
+    type === 'fast' ? 2.8 :
+    type === 'shield' ? 3.2 :
+    type === 'tank' ? 1.4 :
+    2.0;
+  const freqBase =
+    type === 'fast' ? 3.6 :
+    type === 'shield' ? 2.4 :
+    type === 'tank' ? 1.3 :
+    2.0;
+
+  // Shield starts closed for a moment so player has a chance to see it
+  const shieldStartClosed = type === 'shield';
+
   return {
     id: uid(),
     worldX: Math.cos(angle) * dist,
@@ -43,8 +82,38 @@ function spawnEnemy(wave: number): Enemy {
     depth: startDepth,
     isHit: false,
     hitTimer: 0,
+    tauntType,
+    tauntPhase: Math.random() * Math.PI * 2,
+    tauntAmplitude: amplitudeBase * (0.7 + Math.random() * 0.7),
+    tauntFreq: freqBase * (0.8 + Math.random() * 0.5),
+    isShielded: shieldStartClosed,
+    shieldTimer: shieldStartClosed ? SHIELD_CLOSED_DURATION : SHIELD_OPEN_DURATION,
     ...ENEMY_CONFIGS[type],
   };
+}
+
+// Compute current taunt offsets (in degrees). Taunt intensity ramps up as the
+// enemy gets closer so distant enemies don't wobble imperceptibly.
+function tauntOffset(e: Enemy, tSec: number): { dx: number; dy: number } {
+  const proximity = Math.min(1, Math.max(0, 1 - e.depth)); // 0 far, 1 close
+  const intensity = 0.2 + 0.8 * proximity; // never completely still
+  const amp = e.tauntAmplitude * intensity;
+  const phase = e.tauntPhase + tSec * e.tauntFreq;
+  switch (e.tauntType) {
+    case 'weave':
+      return { dx: Math.sin(phase) * amp, dy: Math.sin(phase * 0.5) * amp * 0.3 };
+    case 'bob':
+      return { dx: Math.sin(phase * 0.7) * amp * 0.3, dy: Math.sin(phase) * amp * 0.6 };
+    case 'circle': {
+      const rad = amp * 0.7;
+      return { dx: Math.cos(phase) * rad, dy: Math.sin(phase) * rad * 0.7 };
+    }
+    case 'zigzag': {
+      // Sharp triangle-ish wave
+      const tri = Math.asin(Math.sin(phase)) * (2 / Math.PI);
+      return { dx: tri * amp, dy: Math.sin(phase * 2) * amp * 0.15 };
+    }
+  }
 }
 
 // ---- Tutorial steps ----
@@ -131,6 +200,12 @@ export default function ARGame() {
   const [killCount, setKillCount] = useState(0);
   const [bulletEffects, setBulletEffects] = useState<BulletEffect[]>([]);
   const [hitEffects, setHitEffects] = useState<HitEffect[]>([]);
+  const [faceImage, setFaceImage] = useState<string | null>(null);
+
+  const faceImageRef = useRef<string | null>(null);
+  faceImageRef.current = faceImage;
+  // Seconds counter for taunt motion (stable reference into the game loop)
+  const tauntClockRef = useRef(0);
 
   const gameStateRef = useRef(gameState);
   const orientationRef = useRef(orientation);
@@ -180,6 +255,7 @@ export default function ARGame() {
 
     const delta = Math.min((timestamp - (lastFrameRef.current || timestamp)) / 1000, 0.1);
     lastFrameRef.current = timestamp;
+    tauntClockRef.current += delta;
 
     setEnemies(prev => {
       let updatedLives = livesRef.current;
@@ -202,7 +278,15 @@ export default function ARGame() {
           const waveMultiplier = w === 1 ? 0.5 : 1 + (w - 1) * 0.12;
           const newDepth = e.depth - e.depthSpeed * waveMultiplier * delta;
 
-          return { ...e, depth: newDepth };
+          // Shield cycling (only for shield type)
+          let isShielded = e.isShielded;
+          let shieldTimer = e.shieldTimer - delta;
+          if (e.type === 'shield' && shieldTimer <= 0) {
+            isShielded = !isShielded;
+            shieldTimer = isShielded ? SHIELD_CLOSED_DURATION : SHIELD_OPEN_DURATION;
+          }
+
+          return { ...e, depth: newDepth, isShielded, shieldTimer };
         })
         .filter((e): e is Enemy => e !== null && !(e.isHit && e.hitTimer <= 0));
 
@@ -261,17 +345,20 @@ export default function ARGame() {
     const ori = smoothedOrientationRef.current;
     const dGamma = ori.gamma - cal.gamma;
     const dBeta = ori.beta - cal.beta;
+    const tSec = tauntClockRef.current;
 
     // Determine where bullet goes before mutating enemies
     let hitScreenX = 0;
     let hitScreenY = 0;
     let hitType: EnemyType | null = null;
     let hitScore = 0;
+    let deflected = false;
     const enemies = enemiesRef.current;
 
     for (const e of enemies) {
-      const sx = (e.worldX + dGamma) * scaleX;
-      const sy = (e.worldY + dBeta) * scaleY;
+      const t = tauntOffset(e, tSec);
+      const sx = (e.worldX + t.dx + dGamma) * scaleX;
+      const sy = (e.worldY + t.dy + dBeta) * scaleY;
       const depthProgress = 1 - e.depth;
       const visualScale = DEPTH_MIN_SCALE + (1 - DEPTH_MIN_SCALE) * Math.pow(depthProgress, DEPTH_CURVE);
       const scaledRadius = e.maxDisplayRadius * visualScale;
@@ -279,27 +366,39 @@ export default function ARGame() {
         hitScreenX = sx;
         hitScreenY = sy;
         hitType = e.type;
-        hitScore = e.type === 'basic' ? 100 : e.type === 'fast' ? 150 : 300;
+        hitScore = SCORE_VALUES[e.type];
+        if (e.isShielded) {
+          // Bullet hits shield barrier — bounce off, no damage, no score
+          deflected = true;
+        }
         break;
       }
     }
 
-    // Bullet travels toward hit point (or straight ahead on miss)
-    const bulletAngle = hitType ? Math.atan2(hitScreenY, hitScreenX) : 0;
-    const bulletLen = hitType
-      ? Math.sqrt(hitScreenX ** 2 + hitScreenY ** 2)
-      : Math.max(window.innerWidth, window.innerHeight) * 0.5;
+    // Bullet travels toward enemy; if no target, default to somewhere overhead
+    const fallbackX = 0;
+    const fallbackY = -Math.min(window.innerHeight * 0.35, 260);
+    const bulletTargetX = hitType ? hitScreenX : fallbackX;
+    const bulletTargetY = hitType ? hitScreenY : fallbackY;
 
     const bulletId = uid();
-    setBulletEffects(prev => [...prev, { id: bulletId, angle: bulletAngle, length: bulletLen }]);
+    setBulletEffects(prev => [...prev, {
+      id: bulletId,
+      targetX: bulletTargetX,
+      targetY: bulletTargetY,
+      hit: !!hitType && !deflected,
+    }]);
 
     // After bullet arrives, spawn hit effect if applicable
-    if (hitType) {
+    if (hitType && !deflected) {
       setTimeout(() => {
         const effectId = uid();
         setHitEffects(prev => [...prev, { id: effectId, x: hitScreenX, y: hitScreenY, type: hitType!, score: hitScore }]);
-      }, 100);
+      }, 320);
     }
+
+    // Shielded deflection: do not damage enemies, just flash the shield
+    if (deflected) return;
 
     setEnemies(prev => {
       let hit = false;
@@ -307,15 +406,18 @@ export default function ARGame() {
 
       const next = prev.map(e => {
         if (hit) return e;
-        const sx = (e.worldX + dGamma) * scaleX;
-        const sy = (e.worldY + dBeta) * scaleY;
+        if (e.isShielded) return e; // shielded enemies are invulnerable
+        const t = tauntOffset(e, tSec);
+        const sx = (e.worldX + t.dx + dGamma) * scaleX;
+        const sy = (e.worldY + t.dy + dBeta) * scaleY;
         const depthProgress = 1 - e.depth;
-        const scaledRadius = e.baseHitRadius * (0.06 + 0.94 * Math.pow(depthProgress, 1.4));
-        if (Math.sqrt(sx ** 2 + sy ** 2) < scaledRadius + 15) {
+        const visualScale = DEPTH_MIN_SCALE + (1 - DEPTH_MIN_SCALE) * Math.pow(depthProgress, DEPTH_CURVE);
+        const scaledRadius = e.maxDisplayRadius * visualScale;
+        if (Math.sqrt(sx ** 2 + sy ** 2) < scaledRadius) {
           hit = true;
           const newHealth = e.health - 1;
           if (newHealth <= 0) {
-            scoreGain = hitScore;
+            scoreGain = SCORE_VALUES[e.type];
             setKillCount(k => { killCountRef.current = k + 1; return k + 1; });
             return { ...e, health: 0, isHit: true, hitTimer: 0 };
           }
@@ -335,9 +437,10 @@ export default function ARGame() {
     const ori = smoothedOrientationRef.current;
     const dGamma = ori.gamma - cal.gamma;
     const dBeta  = ori.beta  - cal.beta;
+    const t = tauntOffset(e, tauntClockRef.current);
     return {
-      sx: (e.worldX + dGamma) * scaleX,
-      sy: (e.worldY + dBeta)  * scaleY,
+      sx: (e.worldX + t.dx + dGamma) * scaleX,
+      sy: (e.worldY + t.dy + dBeta)  * scaleY,
     };
   }, []);
 
@@ -412,13 +515,25 @@ export default function ARGame() {
                 killCountRef.current = 0;
                 setEnemies([]);
                 lastSpawnRef.current = 0;
-                setGameState('tutorial');
+                // If we already have a face from a previous run, skip directly to tutorial
+                setGameState(faceImageRef.current ? 'tutorial' : 'faceSetup');
               }}
             >
               スタート
             </button>
           </div>
         </div>
+      )}
+
+      {/* ======== FACE SETUP ======== */}
+      {gameState === 'faceSetup' && (
+        <FaceSetup
+          onDone={(img) => {
+            setFaceImage(img);
+            faceImageRef.current = img;
+            setGameState('tutorial');
+          }}
+        />
       )}
 
       {/* ======== TUTORIAL ======== */}
@@ -470,7 +585,7 @@ export default function ARGame() {
           {/* Enemies */}
           {enemies.map(e => {
             const { sx, sy } = getEnemyScreenPos(e);
-            return <EnemySprite key={e.id} enemy={e} screenX={sx} screenY={sy} />;
+            return <EnemySprite key={e.id} enemy={e} screenX={sx} screenY={sy} faceImage={faceImage} />;
           })}
 
           {/* Off-screen indicators */}
@@ -479,12 +594,13 @@ export default function ARGame() {
             return <OffscreenIndicator key={`ind-${e.id}`} screenX={sx} screenY={sy} type={e.type} />;
           })}
 
-          {/* Bullet effects */}
+          {/* Arc bullet effects */}
           {bulletEffects.map(b => (
-            <BulletEffectComponent
+            <ArcBullet
               key={b.id}
-              angle={b.angle}
-              length={b.length}
+              targetX={b.targetX}
+              targetY={b.targetY}
+              hit={b.hit}
               onDone={() => setBulletEffects(prev => prev.filter(x => x.id !== b.id))}
             />
           ))}

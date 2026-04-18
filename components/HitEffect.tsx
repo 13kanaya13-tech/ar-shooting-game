@@ -12,9 +12,10 @@ interface HitEffectProps {
 }
 
 const TYPE_COLOR: Record<EnemyType, string> = {
-  basic: '#22c55e',
-  fast:  '#facc15',
-  tank:  '#ef4444',
+  basic:  '#22c55e',
+  fast:   '#facc15',
+  tank:   '#ef4444',
+  shield: '#60a5fa',
 };
 
 const PARTICLES = Array.from({ length: 8 }, (_, i) => {

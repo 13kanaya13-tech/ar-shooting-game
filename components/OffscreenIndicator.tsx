@@ -13,6 +13,7 @@ const TYPE_COLORS: Record<EnemyType, string> = {
   basic: '#22c55e',
   fast: '#facc15',
   tank: '#ef4444',
+  shield: '#60a5fa',
 };
 
 const MARGIN = 24; // px from screen edge
